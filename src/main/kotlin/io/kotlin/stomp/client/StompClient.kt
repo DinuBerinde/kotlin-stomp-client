@@ -42,7 +42,7 @@ class StompClient(private val url: String): AutoCloseable {
         onWebSocketConnectionFailed: (() -> Unit)? = null,
         onWebSocketConnectionClosed: (() -> Unit)? = null
     ) {
-        println("Connecting to $url ...")
+        println("[Stomp client] Connecting to $url ...")
 
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
 
@@ -93,7 +93,7 @@ class StompClient(private val url: String): AutoCloseable {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                println("[Stomp client] Closing webSocket session")
+                println("[Stomp client] WebSocket session closed")
                 onWebSocketConnectionClosed?.invoke()
             }
         })
@@ -198,6 +198,8 @@ class StompClient(private val url: String): AutoCloseable {
      * Clears the subscriptions and closes the webSocket connection.
      */
     override fun close() {
+        println("[Stomp client] Closing webSocket session")
+
         synchronized(subscriptions) {
             subscriptions.clear()
         }
