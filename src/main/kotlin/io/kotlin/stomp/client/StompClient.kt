@@ -9,7 +9,7 @@ import io.kotlin.stomp.client.Subscription
 import io.kotlin.stomp.client.exceptions.InternalFailureException
 import io.kotlin.stomp.client.models.ErrorModel
 import okhttp3.*
-import java.util.NoSuchElementException
+import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.function.BiConsumer
 import kotlin.jvm.Throws
@@ -21,8 +21,10 @@ import kotlin.jvm.Throws
  */
 class StompClient(private val url: String): AutoCloseable {
     var onStompSessionError: (() -> Unit)? = null
+    private val clientKey = generateClientKey()
     private val request = Request.Builder()
         .url("ws://$url")
+        .addHeader("uuid", clientKey)
         .build()
     private val okHttpClient = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()
     private val subscriptions: MutableMap<String, Subscription> = mutableMapOf()
@@ -206,5 +208,12 @@ class StompClient(private val url: String): AutoCloseable {
 
         // indicates a normal closure
         webSocket.close(1000, null)
+    }
+
+    /**
+     * Generates an UUID for this webSocket client.
+     */
+    private fun generateClientKey(): String {
+        return UUID.randomUUID().toString()
     }
 }
