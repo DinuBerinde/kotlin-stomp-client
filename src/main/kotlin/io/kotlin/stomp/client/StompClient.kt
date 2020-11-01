@@ -20,17 +20,13 @@ import kotlin.jvm.Throws
  * @param url the url of the webSocket endpoint, without the protocol, e.g localhost:8080
  */
 class StompClient(private val url: String): AutoCloseable {
-    var onStompSessionError: (() -> Unit)? = null
     private val clientKey = generateClientKey()
-    private val request = Request.Builder()
-        .url("ws://$url")
-        .addHeader("uuid", clientKey)
-        .build()
     private val okHttpClient = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()
     private val subscriptions: MutableMap<String, Subscription> = mutableMapOf()
     private lateinit var webSocket: WebSocket
     private val gson = Gson()
 
+    var onStompSessionError: (() -> Unit)? = null
 
 
     /**
@@ -45,6 +41,11 @@ class StompClient(private val url: String): AutoCloseable {
         onWebSocketConnectionClosed: (() -> Unit)? = null
     ) {
         println("[Stomp client] Connecting to $url ...")
+
+        val request = Request.Builder()
+            .url("ws://$url")
+            .addHeader("uuid", clientKey)
+            .build()
 
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
 
