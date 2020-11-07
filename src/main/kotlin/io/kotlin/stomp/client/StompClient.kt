@@ -103,6 +103,14 @@ class StompClient(private val url: String): AutoCloseable {
     }
 
     /**
+     * Returns the key of this client instance. Each instance has a different key.
+     * The key is an UUID.
+     */
+    fun getClientKey(): String {
+        return this.clientKey
+    }
+
+    /**
      * It subscribes to a topic.
      * @param topic the topic
      * @param resultTypeClass the result type class

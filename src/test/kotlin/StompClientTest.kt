@@ -49,8 +49,53 @@ class StompClientTest {
         }
     }
 
+    @Test fun stompClientEchoMessage() {
+
+        val completableFuture = CompletableFuture<Boolean>()
+        val stompClient = StompClient(endpoint)
+        stompClient.use { client ->
+
+            client.connect(
+                {
+                    val topic = "/user/${client.getClientKey()}/echo/message"
+                    client.subscribeTo(topic, EchoModel::class.java) { result, error ->
+
+                        when {
+                            error != null -> {
+                                fail("unexpected error")
+                            }
+                            result != null -> {
+                                assertEquals("hello world", result.message);
+
+                                completableFuture.complete(true)
+                            }
+                            else -> {
+                                fail("unexpected payload")
+                            }
+                        }
+                    }
+
+
+                    Timer().schedule(timerTask {
+                        client.sendTo("/echo/message", EchoModel("hello world"))
+                    }, 2000)
+
+                }, {
+                    fail("Connection failed")
+                }
+            )
+
+            completableFuture.get(4L, TimeUnit.SECONDS)
+        }
+    }
+
     /**
      * Class model used for testing.
      */
     class Event(val name: String)
+
+    /**
+     * Class model used for testing.
+     */
+    class EchoModel(val message: String)
 }
