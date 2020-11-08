@@ -1,16 +1,14 @@
 package io.kotlin.stomp.client
 
 import io.hotmoka.network.thin.client.webSockets.StompClient
-import io.hotmoka.network.thin.client.webSockets.stomp.ResultHandler
 
 /**
- * A subscription to a webSocket topic.
+ * A subscription to a webSocket topic, can be used to unsubscribe from the topic.
  */
 class Subscription(
     val topic: String,
     val subscriptionId: String,
-    private val stompClient: StompClient,
-    val resultHandler: ResultHandler<*>
+    private val stompClient: StompClient
 ) {
 
     /**

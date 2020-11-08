@@ -1,11 +1,10 @@
 import io.hotmoka.network.thin.client.webSockets.StompClient
 import org.junit.Test
-import java.util.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
-import kotlin.concurrent.timerTask
 import kotlin.test.assertEquals
 import kotlin.test.fail
+
 
 class StompClientTest {
     private val endpoint = "localhost:8080/"
@@ -18,34 +17,29 @@ class StompClientTest {
 
             client.connect(
                 {
-                    client.subscribeTo("/topic/events", Event::class.java) { result, error ->
+                    client.subscribeTo("/topic/events", Event::class.java, { result, error ->
 
                         when {
                             error != null -> {
                                 fail("unexpected error")
                             }
                             result != null -> {
-                                assertEquals("testing stomp client", result.name)
-
-                                completableFuture.complete(true)
+                                completableFuture.complete("testing stomp client" == result.name)
                             }
                             else -> {
                                 fail("unexpected payload")
                             }
                         }
-                    }
-
-
-                    Timer().schedule(timerTask {
+                    }, {
                         client.sendTo("/events/add", Event("testing stomp client"))
-                    }, 2000)
+                    })
 
                 }, {
                     fail("Connection failed")
                 }
             )
 
-            completableFuture.get(4L, TimeUnit.SECONDS)
+            assertEquals(true, completableFuture.get(4L, TimeUnit.SECONDS))
         }
     }
 
@@ -58,36 +52,32 @@ class StompClientTest {
             client.connect(
                 {
                     val topic = "/user/${client.getClientKey()}/echo/message"
-                    client.subscribeTo(topic, EchoModel::class.java) { result, error ->
+                    client.subscribeTo(topic, EchoModel::class.java, { result, error ->
 
                         when {
                             error != null -> {
                                 fail("unexpected error")
                             }
                             result != null -> {
-                                assertEquals("hello world", result.message);
-
-                                completableFuture.complete(true)
+                                completableFuture.complete("hello world" == result.message)
                             }
                             else -> {
                                 fail("unexpected payload")
                             }
                         }
-                    }
-
-
-                    Timer().schedule(timerTask {
+                    }, {
                         client.sendTo("/echo/message", EchoModel("hello world"))
-                    }, 2000)
+                    })
 
                 }, {
                     fail("Connection failed")
                 }
             )
 
-            completableFuture.get(4L, TimeUnit.SECONDS)
+            assertEquals(true, completableFuture.get(4L, TimeUnit.SECONDS))
         }
     }
+
 
     /**
      * Class model used for testing.

@@ -7,6 +7,7 @@ import io.hotmoka.network.thin.client.webSockets.stomp.StompMessageBuilder
 import io.hotmoka.network.thin.client.webSockets.stomp.StompMessageParser
 import io.kotlin.stomp.client.Subscription
 import io.kotlin.stomp.client.exceptions.InternalFailureException
+import io.kotlin.stomp.client.internal.InternalSubscription
 import io.kotlin.stomp.client.models.ErrorModel
 import okhttp3.*
 import java.util.*
@@ -22,23 +23,22 @@ import kotlin.jvm.Throws
 class StompClient(private val url: String): AutoCloseable {
     private val clientKey = generateClientKey()
     private val okHttpClient = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()
-    private val subscriptions: MutableMap<String, Subscription> = mutableMapOf()
+    private val subscriptions: MutableMap<String, InternalSubscription> = mutableMapOf()
     private lateinit var webSocket: WebSocket
     private val gson = Gson()
-
-    var onStompSessionError: (() -> Unit)? = null
 
 
     /**
      * It opens a webSocket connection and connects to the STOMP endpoint.
      * @param onStompConnectionOpened handler for a successful STOMP endpoint connection
-     * @param onWebSocketConnectionFailed handler for the webSocket connection failure
-     * @param onWebSocketConnectionClosed handler for the webSocket connection closure
+     * @param onWebSocketFailure handler for the webSocket connection failure due to an error reading from or writing to the network
+     * @param onWebSocketClosed handler for the webSocket connection when both peers have indicated that no more messages
+     * will be transmitted and the connection has been successfully released.
      */
     fun connect(
         onStompConnectionOpened: (() -> Unit)? = null,
-        onWebSocketConnectionFailed: (() -> Unit)? = null,
-        onWebSocketConnectionClosed: (() -> Unit)? = null
+        onWebSocketFailure: (() -> Unit)? = null,
+        onWebSocketClosed: (() -> Unit)? = null
     ) {
         println("[Stomp client] Connecting to $url ...")
 
@@ -69,11 +69,17 @@ class StompClient(private val url: String): AutoCloseable {
                         StompCommand.RECEIPT -> {
                             val destination = message.headers.getDestination()
                             println("[Stomp client] Subscribed to topic $destination")
+
+                            synchronized(subscriptions) {
+                                val subscription = subscriptions[destination] ?: throw NoSuchElementException("Topic not found")
+                                subscription.afterSubscribed?.invoke()
+                            }
                         }
                         StompCommand.ERROR -> {
                             println("[Stomp client] STOMP Session Error: $payload")
-                            onStompSessionErrorInternal()
-                            onStompSessionError?.invoke()
+                            // clean-up client resources because the server closed the connection
+                            close()
+                            onWebSocketFailure?.invoke()
                         }
                         StompCommand.MESSAGE -> {
                             val destination = message.headers.getDestination()
@@ -92,12 +98,14 @@ class StompClient(private val url: String): AutoCloseable {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 println("[Stomp client] WebSocket Session error")
                 t.printStackTrace()
-                onWebSocketConnectionFailed?.invoke()
+
+                close()
+                onWebSocketFailure?.invoke()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 println("[Stomp client] WebSocket session closed")
-                onWebSocketConnectionClosed?.invoke()
+                onWebSocketClosed?.invoke()
             }
         })
     }
@@ -115,26 +123,27 @@ class StompClient(private val url: String): AutoCloseable {
      * @param topic the topic
      * @param resultTypeClass the result type class
      * @param handler the handler to consume with the result and/or error
+     * @param afterSubscribed optional callback to be invoked after a successful subscription
      */
-    fun <T> subscribeTo(topic: String, resultTypeClass: Class<T>, handler: BiConsumer<T?, ErrorModel?>): Subscription {
+    fun <T> subscribeTo(topic: String, resultTypeClass: Class<T>, handler: BiConsumer<T?, ErrorModel?>, afterSubscribed: (() -> Unit)? = null): Subscription {
         println("[Stomp client] Subscribing to  $topic")
 
         val isSubscribed: Boolean
-        val subscription: Subscription
+        val subscription: InternalSubscription
 
         synchronized(subscriptions) {
             isSubscribed = subscriptions[topic] != null
             subscription = subscriptions.computeIfAbsent(topic) { topic_ ->
                 val subscriptionId = "" + (subscriptions.size + 1)
-                Subscription(topic_, subscriptionId, this, ResultHandler(handler, resultTypeClass))
+                InternalSubscription(Subscription(topic_, subscriptionId, this), ResultHandler(handler, resultTypeClass), afterSubscribed)
             }
         }
 
         if (!isSubscribed) {
-            webSocket.send(StompMessageBuilder.buildSubscribeMessage(subscription.topic, subscription.subscriptionId))
+            webSocket.send(StompMessageBuilder.buildSubscribeMessage(subscription.clientSubscription.topic, subscription.clientSubscription.subscriptionId))
         }
 
-        return subscription
+        return subscription.clientSubscription
     }
 
     /**
@@ -147,7 +156,7 @@ class StompClient(private val url: String): AutoCloseable {
 
         val subscriptionId: String
         synchronized(subscriptions) {
-            subscriptionId = subscriptions[topic]?.subscriptionId ?: throw NoSuchElementException("Topic not found")
+            subscriptionId = subscriptions[topic]?.clientSubscription?.subscriptionId ?: throw NoSuchElementException("Topic not found")
             subscriptions.remove(topic)
         }
 
@@ -193,15 +202,6 @@ class StompClient(private val url: String): AutoCloseable {
                     handler.handler.accept(null, ErrorModel("Got an error", InternalFailureException::class.java.name))
                 }
             }
-        }
-    }
-
-    /**
-     * Handler for the internal STOMP session error. It clears the subscriptions.
-     */
-    private fun onStompSessionErrorInternal() {
-        synchronized(subscriptions) {
-            subscriptions.clear()
         }
     }
 
