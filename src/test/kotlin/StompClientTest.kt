@@ -1,7 +1,11 @@
 import io.hotmoka.network.thin.client.webSockets.StompClient
 import org.junit.Test
+import java.util.*
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.timerTask
 import kotlin.test.assertEquals
 import kotlin.test.fail
 
@@ -17,29 +21,31 @@ class StompClientTest {
 
             client.connect(
                 {
-                    client.subscribeTo("/topic/events", Event::class.java, { result, error ->
+                    CompletableFuture.runAsync {
+                        client.subscribeTo("/topic/events", Event::class.java, { result, error ->
 
-                        when {
-                            error != null -> {
-                                fail("unexpected error")
+                            when {
+                                error != null -> {
+                                    fail("unexpected error")
+                                }
+                                result != null -> {
+                                    completableFuture.complete("testing stomp client" == result.name)
+                                }
+                                else -> {
+                                    fail("unexpected payload")
+                                }
                             }
-                            result != null -> {
-                                completableFuture.complete("testing stomp client" == result.name)
-                            }
-                            else -> {
-                                fail("unexpected payload")
-                            }
-                        }
-                    }, {
-                        client.sendTo("/events/add", Event("testing stomp client"))
-                    })
+                        }, {
+                            client.sendTo("/events/add", Event("testing stomp client"))
+                        })
+                    }
 
                 }, {
                     fail("Connection failed")
                 }
             )
 
-            assertEquals(true, completableFuture.get(4L, TimeUnit.SECONDS))
+            assertEquals(true, completableFuture.get(4, TimeUnit.SECONDS))
         }
     }
 
@@ -51,23 +57,26 @@ class StompClientTest {
 
             client.connect(
                 {
-                    val topic = "/user/${client.getClientKey()}/echo/message"
-                    client.subscribeTo(topic, EchoModel::class.java, { result, error ->
 
-                        when {
-                            error != null -> {
-                                fail("unexpected error")
+                    CompletableFuture.runAsync {
+                        val topic = "/user/${client.getClientKey()}/echo/message"
+                        client.subscribeTo(topic, EchoModel::class.java, { result, error ->
+
+                            when {
+                                error != null -> {
+                                    fail("unexpected error")
+                                }
+                                result != null -> {
+                                    completableFuture.complete("hello world" == result.message)
+                                }
+                                else -> {
+                                    fail("unexpected payload")
+                                }
                             }
-                            result != null -> {
-                                completableFuture.complete("hello world" == result.message)
-                            }
-                            else -> {
-                                fail("unexpected payload")
-                            }
-                        }
-                    }, {
-                        client.sendTo("/echo/message", EchoModel("hello world"))
-                    })
+                        }, {
+                            client.sendTo("/echo/message", EchoModel("hello world"))
+                        })
+                    }
 
                 }, {
                     fail("Connection failed")
@@ -79,6 +88,63 @@ class StompClientTest {
     }
 
 
+    @Test fun concurrentlySendEchoMessages() {
+        val numOfThreads = 40
+        val pool = Executors.newCachedThreadPool()
+        val completableFuture = CompletableFuture<Boolean>()
+        val results = HashMap<String, Boolean>(numOfThreads)
+
+        val stompClient = StompClient(endpoint)
+        stompClient.use { client ->
+
+            stompClient.connect({
+
+                CompletableFuture.runAsync {
+
+                    // subscribe
+                    val topic = "/user/${stompClient.getClientKey()}/echo/message"
+                    stompClient.subscribeTo(topic, EchoModel::class.java, { result, error ->
+
+                        when {
+                            error != null -> {
+                                fail("unexpected error")
+                            }
+                            result != null -> {
+                                results[result.message] = true
+                            }
+                            else -> {
+                                fail("unexpected payload")
+                            }
+                        }
+
+                    }, {
+
+                        // build workers
+                        val workers = arrayListOf<StompClientSendWorker>()
+                        for (i in 0..numOfThreads) {
+                            workers.add(StompClientSendWorker(EchoModel("hello world $i"), pool, client))
+                            results["hello world $i"] = false
+                        }
+
+                        // concurrent requests
+                        workers.parallelStream().forEach{ worker -> worker.call() }
+                        pool.shutdown()
+                    })
+                }
+
+            })
+
+            // check results
+            Timer().schedule(timerTask {
+                completableFuture.complete(results.values.parallelStream().allMatch { ok: Boolean? -> ok!! })
+            }, 3000)
+
+            assertEquals(true, completableFuture.get(4, TimeUnit.SECONDS))
+        }
+    }
+
+
+
     /**
      * Class model used for testing.
      */
@@ -88,4 +154,21 @@ class StompClientTest {
      * Class model used for testing.
      */
     class EchoModel(val message: String)
+
+
+    /**
+     * STOMP client send worker to send messages to a destination.
+     */
+    class StompClientSendWorker(
+        private val echoModel: EchoModel,
+        private val pool: ExecutorService,
+        private val stompClient: StompClient
+    ) {
+
+        fun call() {
+            CompletableFuture.runAsync({
+                stompClient.sendTo("/echo/message", echoModel)
+            }, pool)
+        }
+    }
 }

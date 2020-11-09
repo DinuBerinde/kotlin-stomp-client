@@ -13,7 +13,6 @@ import okhttp3.*
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.function.BiConsumer
-import kotlin.jvm.Throws
 
 
 /**
@@ -26,6 +25,7 @@ class StompClient(private val url: String): AutoCloseable {
     private val subscriptions: MutableMap<String, InternalSubscription> = mutableMapOf()
     private lateinit var webSocket: WebSocket
     private val gson = Gson()
+
 
 
     /**
@@ -72,7 +72,7 @@ class StompClient(private val url: String): AutoCloseable {
 
                             synchronized(subscriptions) {
                                 val subscription = subscriptions[destination] ?: throw NoSuchElementException("Topic not found")
-                                subscription.afterSubscribed?.invoke()
+                                subscription.emitSubscription()
                             }
                         }
                         StompCommand.ERROR -> {
@@ -141,6 +141,8 @@ class StompClient(private val url: String): AutoCloseable {
 
         if (!isSubscribed) {
             webSocket.send(StompMessageBuilder.buildSubscribeMessage(subscription.clientSubscription.topic, subscription.clientSubscription.subscriptionId))
+            subscription.awaitSubscription()
+            subscription.afterSubscribed?.invoke()
         }
 
         return subscription.clientSubscription
