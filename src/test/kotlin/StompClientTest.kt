@@ -5,7 +5,6 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import kotlin.concurrent.timerTask
 import kotlin.test.assertEquals
 import kotlin.test.fail
 
@@ -99,6 +98,7 @@ class StompClientTest {
 
             stompClient.connect({
 
+                val delayedTask = CompletableFuture.delayedExecutor(3, TimeUnit.SECONDS)
                 CompletableFuture.runAsync {
 
                     // subscribe
@@ -130,14 +130,17 @@ class StompClientTest {
                         workers.parallelStream().forEach{ worker -> worker.call() }
                         pool.shutdown()
                     })
-                }
+
+                }.thenRunAsync(
+                    {
+
+                        // check results
+                        completableFuture.complete(results.values.parallelStream().allMatch { ok: Boolean? -> ok!! })
+                    },
+                    delayedTask
+                )
 
             })
-
-            // check results
-            Timer().schedule(timerTask {
-                completableFuture.complete(results.values.parallelStream().allMatch { ok: Boolean? -> ok!! })
-            }, 3000)
 
             assertEquals(true, completableFuture.get(4, TimeUnit.SECONDS))
         }
