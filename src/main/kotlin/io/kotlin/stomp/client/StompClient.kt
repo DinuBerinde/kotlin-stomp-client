@@ -16,7 +16,7 @@ import java.util.function.BiConsumer
 
 
 /**
- * A webSocket client which implements the STOMP protocol [https://stomp.github.io/index.html].
+ * A thread safe webSocket client which implements the STOMP protocol [https://stomp.github.io/index.html].
  * @param url the url of the webSocket endpoint, without the protocol, e.g localhost:8080
  */
 class StompClient(private val url: String): AutoCloseable {
