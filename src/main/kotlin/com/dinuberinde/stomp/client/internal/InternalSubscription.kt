@@ -1,7 +1,5 @@
-package io.kotlin.stomp.client.internal
-
-import io.hotmoka.network.thin.client.webSockets.stomp.ResultHandler
-import io.kotlin.stomp.client.Subscription
+package com.dinuberinde.stomp.client.internal
+import com.dinuberinde.stomp.client.Subscription
 import okhttp3.internal.notify
 import okhttp3.internal.wait
 

@@ -1,4 +1,4 @@
-package io.kotlin.stomp.client.exceptions
+package com.dinuberinde.stomp.client.exceptions
 
 import java.lang.RuntimeException
 

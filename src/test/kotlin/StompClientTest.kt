@@ -1,4 +1,5 @@
-import io.hotmoka.network.thin.client.webSockets.StompClient
+
+import com.dinuberinde.stomp.client.StompClient
 import org.junit.Test
 import java.util.*
 import java.util.concurrent.CompletableFuture
@@ -10,7 +11,7 @@ import kotlin.test.fail
 
 
 class StompClientTest {
-    private val endpoint = "localhost:8080/"
+    private val endpoint = "ws://localhost:8080/"
 
     @Test fun stompClientTopic() {
 

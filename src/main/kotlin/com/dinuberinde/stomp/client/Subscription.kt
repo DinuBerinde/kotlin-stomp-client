@@ -1,6 +1,4 @@
-package io.kotlin.stomp.client
-
-import io.hotmoka.network.thin.client.webSockets.StompClient
+package com.dinuberinde.stomp.client
 
 /**
  * A subscription to a webSocket topic, can be used to unsubscribe from the topic.

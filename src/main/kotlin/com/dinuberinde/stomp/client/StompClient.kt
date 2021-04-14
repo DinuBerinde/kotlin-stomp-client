@@ -1,14 +1,13 @@
-package io.hotmoka.network.thin.client.webSockets
+package com.dinuberinde.stomp.client
 
+import com.dinuberinde.stomp.client.exceptions.InternalFailureException
+import com.dinuberinde.stomp.client.internal.InternalSubscription
+import com.dinuberinde.stomp.client.models.ErrorModel
 import com.google.gson.Gson
-import io.hotmoka.network.thin.client.webSockets.stomp.ResultHandler
-import io.hotmoka.network.thin.client.webSockets.stomp.StompCommand
-import io.hotmoka.network.thin.client.webSockets.stomp.StompMessageBuilder
-import io.hotmoka.network.thin.client.webSockets.stomp.StompMessageParser
-import io.kotlin.stomp.client.Subscription
-import io.kotlin.stomp.client.exceptions.InternalFailureException
-import io.kotlin.stomp.client.internal.InternalSubscription
-import io.kotlin.stomp.client.models.ErrorModel
+import com.dinuberinde.stomp.client.internal.ResultHandler
+import com.dinuberinde.stomp.client.internal.StompCommand
+import com.dinuberinde.stomp.client.internal.StompMessageBuilder
+import com.dinuberinde.stomp.client.internal.StompMessageParser
 import okhttp3.*
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -17,7 +16,7 @@ import java.util.function.BiConsumer
 
 /**
  * A thread safe webSocket client which implements the STOMP protocol [https://stomp.github.io/index.html].
- * @param url the url of the webSocket endpoint, without the protocol, e.g localhost:8080
+ * @param url the url of the webSocket endpoint, e.g ws://localhost:8080
  */
 class StompClient(private val url: String): AutoCloseable {
     private val clientKey = generateClientKey()
@@ -43,7 +42,7 @@ class StompClient(private val url: String): AutoCloseable {
         println("[Stomp client] Connecting to $url ...")
 
         val request = Request.Builder()
-            .url("ws://$url")
+            .url(url)
             .addHeader("uuid", clientKey)
             .build()
 

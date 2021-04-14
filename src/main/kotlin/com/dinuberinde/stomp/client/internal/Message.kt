@@ -1,4 +1,4 @@
-package io.hotmoka.network.thin.client.webSockets.stomp
+package com.dinuberinde.stomp.client.internal
 
 /**
  * It represents a STOMP message, a class which holds the STOMP command,

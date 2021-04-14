@@ -1,4 +1,4 @@
-package io.kotlin.stomp.client.models
+package com.dinuberinde.stomp.client.models
 
 /**
  * The model of an exception thrown by an endpoint method.

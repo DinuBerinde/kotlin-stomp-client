@@ -1,8 +1,8 @@
-package io.hotmoka.network.thin.client.webSockets.stomp
+package com.dinuberinde.stomp.client.internal
 
 import com.google.gson.Gson
-import io.kotlin.stomp.client.exceptions.InternalFailureException
-import io.kotlin.stomp.client.models.ErrorModel
+import com.dinuberinde.stomp.client.exceptions.InternalFailureException
+import com.dinuberinde.stomp.client.models.ErrorModel
 import java.util.function.BiConsumer
 import kotlin.jvm.Throws
 

@@ -1,4 +1,4 @@
-package io.hotmoka.network.thin.client.webSockets.stomp
+package com.dinuberinde.stomp.client.internal
 
 /**
  * Enum class which represents the STOMP protocol commands.
