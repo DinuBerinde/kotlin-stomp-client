@@ -1,3 +1,2 @@
-
-rootProject.name = "KotlinStompClient"
+rootProject.name = "kotlin-stomp-client"
 
