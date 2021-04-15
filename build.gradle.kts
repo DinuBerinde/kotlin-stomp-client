@@ -25,11 +25,4 @@ tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>() {
     manifest.attributes.apply {
         put("Main-Class", "com.dinuberinde.stomp.client.StompClient")
     }
-
-    val allowedModules: MutableList<String> = mutableListOf("com.google.code.gson", "com.squareup.okhttp3", "com.squareup.okio")
-    this.dependencies {
-        this.include{
-            allowedModules.contains(it.moduleGroup)
-        }
-    }
 }
