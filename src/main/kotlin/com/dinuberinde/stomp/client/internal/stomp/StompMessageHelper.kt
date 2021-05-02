@@ -1,8 +1,7 @@
 package com.dinuberinde.stomp.client.internal.stomp
 
 import com.dinuberinde.stomp.client.internal.Message
-import com.google.gson.Gson
-import kotlin.jvm.Throws
+import com.google.gson.GsonBuilder
 
 
 class StompMessageHelper {
@@ -17,7 +16,7 @@ class StompMessageHelper {
      * </ul>
      */
     companion object {
-        private val gson = Gson()
+        private val gson = GsonBuilder().disableHtmlEscaping().serializeNulls().create()
         private val END = "\u0000"
         private val NEW_LINE = "\n"
         private val DESTINATION = "destination"
