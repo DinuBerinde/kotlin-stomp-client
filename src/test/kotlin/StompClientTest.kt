@@ -41,7 +41,7 @@ class StompClientTest {
                         }
 
                         // send event
-                        client.sendTo("/events/add", Event("testing stomp client"))
+                        client.sendToTopic("/events/add", Event("testing stomp client"))
                     }
 
                 }, {
@@ -65,8 +65,8 @@ class StompClientTest {
                     CompletableFuture.runAsync {
 
                         // subscribe and send payload
-                        val result: EchoModel? = client.subscribeAndSend("/echo/message", EchoModel::class.java, EchoModel("hello world"))
-                        val result2: EchoModel? = client.subscribeAndSend("/echo/message", EchoModel::class.java, EchoModel("hello world test"))
+                        val result: EchoModel? = client.send("/echo/message", EchoModel::class.java, EchoModel("hello world"))
+                        val result2: EchoModel? = client.send("/echo/message", EchoModel::class.java, EchoModel("hello world test"))
 
                         completableFuture.complete("hello world" == result?.message && "hello world test" == result2?.message)
                     }
@@ -148,7 +148,7 @@ class StompClientTest {
                 try {
 
                     // subscribe and send payload
-                    val result: EchoModel? = stompClient.subscribeAndSend("/echo/message", EchoModel::class.java, echoModel)
+                    val result: EchoModel? = stompClient.send("/echo/message", EchoModel::class.java, echoModel)
 
                     // fill the map results
                     result?.let {

@@ -17,7 +17,7 @@ import java.util.function.BiConsumer
 
 
 /**
- * A thread safe webSocket client which implements the STOMP protocol [https://stomp.github.io/index.html].
+ * A synchronous and asynchronous thread safe webSocket client which implements the STOMP protocol [https://stomp.github.io/index.html].
  * @param url the url of the webSocket endpoint, e.g ws://localhost:8080
  */
 class StompClient(private val url: String) : AutoCloseable {
@@ -238,11 +238,11 @@ class StompClient(private val url: String) : AutoCloseable {
      * @param topic      the topic
      * @param resultType the result type
      */
-    fun <T> subscribeAndSend(
+    fun <T> send(
         topicDestination: String,
         resultType: Class<T>,
     ): T? {
-        return subscribeAndSend(topicDestination, resultType, null)
+        return send(topicDestination, resultType, null)
     }
 
     /**
@@ -255,7 +255,7 @@ class StompClient(private val url: String) : AutoCloseable {
      * @param resultType the result type
      * @param payload    the payload
      */
-    fun <T, P> subscribeAndSend(
+    fun <T, P> send(
         topicDestination: String,
         resultType: Class<T>,
         payload: P
@@ -335,16 +335,6 @@ class StompClient(private val url: String) : AutoCloseable {
         subscription.awaitSubscription()
     }
 
-
-    /**
-     * It sends a payload to a destination.
-     * @param destination the destination
-     * @param payload the payload
-     */
-    fun <T> sendTo(destination: String, payload: T?) {
-        println("[Stomp client] Sending message to destination $destination")
-        webSocket.send(StompMessageHelper.buildSendMessage(destination, payload))
-    }
 
     /**
      * It handles a STOMP result message of a destination.
