@@ -65,7 +65,7 @@ stompClient.close()
 
 ## Tests
 In order to execute the tests, be sure to download and launch 
-locally the webSocket server implementation https://github.com/DinuBerinde/SpringStompWebSockets  
+locally the webSocket server implementation https://github.com/DinuBerinde/SpringBootStompWebSocketsDemo  
 
 ## Author
 Dinu Berinde <dinu2193@gmail.com>
