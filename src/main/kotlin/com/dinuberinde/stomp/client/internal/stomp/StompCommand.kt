@@ -1,4 +1,4 @@
-package com.dinuberinde.stomp.client.internal
+package com.dinuberinde.stomp.client.internal.stomp
 
 /**
  * Enum class which represents the STOMP protocol commands.

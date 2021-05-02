@@ -1,4 +1,4 @@
-package com.dinuberinde.stomp.client.internal
+package com.dinuberinde.stomp.client.internal.stomp
 
 import java.util.NoSuchElementException
 import kotlin.jvm.Throws

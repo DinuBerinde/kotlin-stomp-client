@@ -1,30 +1,62 @@
 package com.dinuberinde.stomp.client
 
 import com.dinuberinde.stomp.client.exceptions.InternalFailureException
-import com.dinuberinde.stomp.client.internal.InternalSubscription
-import com.dinuberinde.stomp.client.models.ErrorModel
-import com.google.gson.Gson
+import com.dinuberinde.stomp.client.exceptions.NetworkExceptionResponse
 import com.dinuberinde.stomp.client.internal.ResultHandler
-import com.dinuberinde.stomp.client.internal.StompCommand
-import com.dinuberinde.stomp.client.internal.StompMessageBuilder
-import com.dinuberinde.stomp.client.internal.StompMessageParser
+import com.dinuberinde.stomp.client.internal.stomp.StompCommand
+import com.dinuberinde.stomp.client.internal.stomp.StompMessageHelper
 import okhttp3.*
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.*
+import java.util.concurrent.BlockingQueue
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.function.BiConsumer
+import java.util.logging.Level
 
 
 /**
  * A thread safe webSocket client which implements the STOMP protocol [https://stomp.github.io/index.html].
  * @param url the url of the webSocket endpoint, e.g ws://localhost:8080
  */
-class StompClient(private val url: String): AutoCloseable {
-    private val clientKey = generateClientKey()
-    private val okHttpClient = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()
-    private val subscriptions: MutableMap<String, InternalSubscription> = mutableMapOf()
-    private lateinit var webSocket: WebSocket
-    private val gson = Gson()
+class StompClient(private val url: String) : AutoCloseable {
 
+    /**
+     * The unique identifier of this client. This allows more clients to connect to the same server.
+     */
+    private val clientKey = generateClientKey()
+
+    /**
+     * The okHttpClient.
+     */
+    private val okHttpClient = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()
+
+    /**
+     * The websockets subscriptions open so far with this client, per topic.
+     */
+    private val subscriptions: ConcurrentHashMap<String, Subscription> = ConcurrentHashMap()
+
+    /**
+     * The websockets queues where the results are published and consumed, per topic.
+     */
+    private val queues: ConcurrentHashMap<String, BlockingQueue<Any>> = ConcurrentHashMap()
+
+    /**
+     * Lock to synchronize the initial connection of the websocket client.
+     */
+    private val CONNECTION_LOCK = Object()
+
+    /**
+     * Boolean to track whether the client is connected.
+     */
+    private var isClientConnected = false
+
+    /**
+     * The websocket instance.
+     */
+    private lateinit var webSocket: WebSocket
 
 
     /**
@@ -50,13 +82,13 @@ class StompClient(private val url: String): AutoCloseable {
 
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 // we open the stomp session
-                webSocket.send(StompMessageBuilder.buildConnectMessage())
+                webSocket.send(StompMessageHelper.buildConnectMessage())
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
 
                 try {
-                    val message = StompMessageParser(text).parse()
+                    val message = StompMessageHelper.parseStompMessage(text)
                     val payload = message.payload
 
                     when (message.command) {
@@ -64,15 +96,15 @@ class StompClient(private val url: String): AutoCloseable {
                         StompCommand.CONNECTED -> {
                             println("[Stomp client] Connected to stomp session")
                             onStompConnectionOpened?.invoke()
+                            emitClientConnected()
                         }
                         StompCommand.RECEIPT -> {
                             val destination = message.headers.getDestination()
                             println("[Stomp client] Subscribed to topic $destination")
 
-                            synchronized(subscriptions) {
-                                val subscription = subscriptions[destination] ?: throw NoSuchElementException("Topic not found")
-                                subscription.emitSubscription()
-                            }
+                            val subscription =
+                                subscriptions[destination] ?: throw NoSuchElementException("Topic not found")
+                            subscription.emitSubscription()
                         }
                         StompCommand.ERROR -> {
                             println("[Stomp client] STOMP Session Error: $payload")
@@ -83,7 +115,7 @@ class StompClient(private val url: String): AutoCloseable {
                         StompCommand.MESSAGE -> {
                             val destination = message.headers.getDestination()
                             println("[Stomp client] Received message from topic $destination")
-                            handleStompDestinationPayload(payload, destination)
+                            handleStompDestinationResult(payload, destination)
                         }
                         else -> println("Got an unknown message")
                     }
@@ -107,62 +139,203 @@ class StompClient(private val url: String): AutoCloseable {
                 onWebSocketClosed?.invoke()
             }
         })
+
+        awaitClientConnection()
+    }
+
+    /**
+     * Emits that the client is connected.
+     */
+    private fun emitClientConnected() {
+        synchronized(CONNECTION_LOCK) { CONNECTION_LOCK.notify() }
+    }
+
+    /**
+     * Awaits if necessary until the websocket client is connected.
+     */
+    private fun awaitClientConnection() {
+        synchronized(CONNECTION_LOCK) {
+            if (!isClientConnected) try {
+                CONNECTION_LOCK.wait()
+                isClientConnected = true
+            } catch (e: InterruptedException) {
+                println("[Stomp client] Interrupted while waiting for subscription")
+                e.printStackTrace()
+            }
+        }
     }
 
     /**
      * Returns the key of this client instance. Each instance has a different key.
-     * The key is an UUID.
      */
     fun getClientKey(): String {
         return this.clientKey
     }
 
     /**
-     * It subscribes to a topic.
+     * Subscribes to a topic providing a {@link BiConsumer} handler to handle the result published by the topic.
+     * The subscription is recycled and the method awaits for the subscription to complete.
      * @param topic the topic
-     * @param resultTypeClass the result type class
+     * @param resultType the result type class
      * @param handler the handler to consume with the result and/or error
-     * @param afterSubscribed optional callback to be invoked after a successful subscription
      */
-    fun <T> subscribeTo(topic: String, resultTypeClass: Class<T>, handler: BiConsumer<T?, ErrorModel?>, afterSubscribed: (() -> Unit)? = null): Subscription {
-        println("[Stomp client] Subscribing to  $topic")
+    fun <T> subscribeToTopic(
+        topic: String,
+        resultType: Class<T>,
+        handler: BiConsumer<T?, ErrorModel?>
+    ) {
 
-        val isSubscribed: Boolean
-        val subscription: InternalSubscription
+        val subscription = subscriptions.computeIfAbsent(topic) {
 
-        synchronized(subscriptions) {
-            isSubscribed = subscriptions[topic] != null
-            subscription = subscriptions.computeIfAbsent(topic) { topic_ ->
-                val subscriptionId = "" + (subscriptions.size + 1)
-                InternalSubscription(Subscription(topic_, subscriptionId, this), ResultHandler(handler, resultTypeClass), afterSubscribed)
+            val resultHandler = object : ResultHandler<T>(resultType) {
+
+                override fun deliverResult(result: String) {
+                    try {
+                        handler.accept(toModel(result), null)
+                    } catch (e: InternalFailureException) {
+                        deliverError(
+                            ErrorModel(
+                                e.message ?: "Got a deserialization error",
+                                InternalFailureException::class.java.name
+                            )
+                        )
+                    }
+                }
+
+                override fun deliverError(errorModel: ErrorModel) {
+                    handler.accept(null, errorModel)
+                }
+
+                override fun deliverNothing() {
+                    handler.accept(null, null)
+                }
             }
+
+            subscribeInternal(it, resultHandler)
         }
 
-        if (!isSubscribed) {
-            webSocket.send(StompMessageBuilder.buildSubscribeMessage(subscription.clientSubscription.topic, subscription.clientSubscription.subscriptionId))
-            subscription.awaitSubscription()
-            subscription.afterSubscribed?.invoke()
-        }
-
-        return subscription.clientSubscription
+        subscription.awaitSubscription()
     }
 
     /**
-     * It unsubscribes from a topic.
-     * @param topic the topic
+     * It sends a payload to a previous subscribed topic. The method {@link #subscribeToTopic(String, Class, BiConsumer)}}
+     * is used to subscribe to a topic.
+     *
+     * @param topic   the topic
+     * @param payload the payload
      */
-    @Throws(NoSuchElementException::class)
-    fun unsubscribeFrom(topic: String) {
-        println("[Stomp client] Unsubscribing from  $topic")
+    fun <T> sendToTopic(
+        topic: String,
+        payload: T
+    ) {
+        println("[Stomp client] Sending to ${topic}")
+        webSocket.send(StompMessageHelper.buildSendMessage(topic, payload))
+    }
 
-        val subscriptionId: String
-        synchronized(subscriptions) {
-            subscriptionId = subscriptions[topic]?.clientSubscription?.subscriptionId ?: throw NoSuchElementException("Topic not found")
-            subscriptions.remove(topic)
+    /**
+     * It sends a message payload to the standard "user" topic destination by performing an initial subscription
+     * and then it waits for the result. The subscription is recycled.
+     *
+     * @param topic      the topic
+     * @param resultType the result type
+     */
+    fun <T> subscribeAndSend(
+        topicDestination: String,
+        resultType: Class<T>,
+    ): T? {
+        return subscribeAndSend(topicDestination, resultType, null)
+    }
+
+    /**
+     * It sends a message payload to the standard "user" topic destination by performing an initial subscription
+     * and then it waits for the result. The subscription is recycled.
+     *
+     * @param <T>        the type of the expected result
+     * @param <P>        the type of the payload
+     * @param topicDestination      the topic
+     * @param resultType the result type
+     * @param payload    the payload
+     */
+    fun <T, P> subscribeAndSend(
+        topicDestination: String,
+        resultType: Class<T>,
+        payload: P
+    ): T? {
+        println("[Stomp client] Subscribing to ${topicDestination}")
+
+        val resultTopic = "/user/$clientKey$topicDestination"
+        val result: Any
+
+        val queue = queues.computeIfAbsent(topicDestination) { LinkedBlockingQueue(1) }
+        synchronized(queue) {
+            subscribe(resultTopic, resultType, queue)
+
+            println("[Stomp client] Sending payload to  $topicDestination")
+            webSocket.send(StompMessageHelper.buildSendMessage(topicDestination, payload))
+            result = queue.take()
         }
 
-        webSocket.send(StompMessageBuilder.buildUnsubscribeMessage(subscriptionId))
+        return if (result is Nothing) null else if (result is ErrorModel) throw NetworkExceptionResponse(
+            ErrorModel.toString(
+                result
+            )
+        ) else result as T
     }
+
+    /**
+     * Subscribes to a topic.
+     *
+     * @param topic      the topic
+     * @param resultType the result type
+     * @param queue      the queue
+     * @param <T>        the result type
+     */
+    private fun <T> subscribe(
+        topic: String,
+        resultType: Class<T>,
+        queue: BlockingQueue<Any>
+    ) {
+
+        val subscription = subscriptions.computeIfAbsent(topic) {
+
+            val resultHandler = object : ResultHandler<T>(resultType) {
+
+                override fun deliverResult(result: String) {
+                    try {
+                        deliverInternal(toModel(result))
+                    } catch (e: InternalFailureException) {
+                        deliverError(
+                            ErrorModel(
+                                e.message ?: "Got a deserialization error",
+                                InternalFailureException::class.java.name
+                            )
+                        )
+                    }
+                }
+
+                override fun deliverError(errorModel: ErrorModel) {
+                    deliverInternal(errorModel)
+                }
+
+                override fun deliverNothing() {
+                    deliverInternal(Nothing())
+                }
+
+                private fun deliverInternal(result: Any) {
+                    try {
+                        queue.put(result)
+                    } catch (e: java.lang.Exception) {
+                        println("[Stomp client] Queue put error")
+                        e.printStackTrace()
+                    }
+                }
+            }
+
+            subscribeInternal(it, resultHandler)
+        }
+        subscription.awaitSubscription()
+    }
+
 
     /**
      * It sends a payload to a destination.
@@ -171,39 +344,49 @@ class StompClient(private val url: String): AutoCloseable {
      */
     fun <T> sendTo(destination: String, payload: T?) {
         println("[Stomp client] Sending message to destination $destination")
-        webSocket.send(StompMessageBuilder.buildSendMessage(destination, payload))
+        webSocket.send(StompMessageHelper.buildSendMessage(destination, payload))
     }
 
     /**
-     * It handles the STOMP payload of a destination.
-     * @param payload the payload
+     * It handles a STOMP result message of a destination.
+     *
+     * @param result      the result
      * @param destination the destination
      */
-    private fun handleStompDestinationPayload(payload: String?, destination: String) {
-
-        val resultHandler: ResultHandler<*>?
-        synchronized(subscriptions) {
-            resultHandler = subscriptions[destination]?.resultHandler
+    private fun handleStompDestinationResult(result: String?, destination: String) {
+        val subscription = subscriptions[destination]
+        subscription?.let {
+            val resultHandler = it.resultHandler
+            if (resultHandler.resultTypeClass == Unit::class.java || result == null || result == "null")
+                resultHandler.deliverNothing()
+            else
+                resultHandler.deliverResult(result)
         }
+    }
 
-        resultHandler?.let { handler ->
+    /**
+     * Internal method to subscribe to a topic. The subscription is recycled.
+     *
+     * @param topic   the topic
+     * @param handler the result handler of the topic
+     * @return the subscription
+     */
+    private fun subscribeInternal(topic: String, handler: ResultHandler<*>): Subscription {
+        val subscriptionId = "" + (subscriptions.size + 1)
+        val subscription = Subscription(topic, subscriptionId, handler)
+        webSocket.send(StompMessageHelper.buildSubscribeMessage(subscription.topic, subscription.subscriptionId))
 
-            when {
-                handler.resultTypeClass == Unit::class.java -> {
-                    handler.handler.accept(null, null)
-                }
-                payload != null -> {
-                    try {
-                        handler.handler.accept(handler.toModel(payload, gson), null)
-                    } catch (e: InternalFailureException) {
-                        handler.handler.accept(null, ErrorModel(e.message ?: "Got a deserialization error", InternalFailureException::class.java.name))
-                    }
-                }
-                else -> {
-                    handler.handler.accept(null, ErrorModel("Got an error", InternalFailureException::class.java.name))
-                }
-            }
-        }
+        return subscription
+    }
+
+    /**
+     * It unsubscribes from a topic.
+     *
+     * @param subscription the subscription
+     */
+    private fun unsubscribeFrom(subscription: Subscription) {
+        println("[Stomp client] Unsubscribing from ${subscription.topic}")
+        webSocket.send(StompMessageHelper.buildUnsubscribeMessage(subscription.subscriptionId));
     }
 
     /**
@@ -212,9 +395,8 @@ class StompClient(private val url: String): AutoCloseable {
     override fun close() {
         println("[Stomp client] Closing webSocket session")
 
-        synchronized(subscriptions) {
-            subscriptions.clear()
-        }
+        subscriptions.values.forEach { unsubscribeFrom(it) }
+        subscriptions.clear()
 
         // indicates a normal closure
         webSocket.close(1000, null)
@@ -224,6 +406,28 @@ class StompClient(private val url: String): AutoCloseable {
      * Generates an UUID for this webSocket client.
      */
     private fun generateClientKey(): String {
-        return UUID.randomUUID().toString()
+        return try {
+            val salt = MessageDigest.getInstance("SHA-256")
+            salt.update(UUID.randomUUID().toString().toByteArray(StandardCharsets.UTF_8))
+            bytesToHex(salt.digest())
+        } catch (e: java.lang.Exception) {
+            UUID.randomUUID().toString()
+        }
     }
+
+    private fun bytesToHex(bytes: ByteArray): String {
+        val HEX_ARRAY = "0123456789abcdef".toByteArray()
+        val hexChars = ByteArray(bytes.size * 2)
+        for (j in bytes.indices) {
+            val v: Int = bytes[j].toInt() and 0xFF
+            hexChars[j * 2] = HEX_ARRAY[v ushr 4]
+            hexChars[j * 2 + 1] = HEX_ARRAY[v and 0x0F]
+        }
+        return String(hexChars, StandardCharsets.UTF_8)
+    }
+
+    /**
+     * Special object to wrap a NOP.
+     */
+    inner class Nothing
 }

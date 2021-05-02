@@ -1,28 +1,47 @@
 package com.dinuberinde.stomp.client.internal
 
-import com.google.gson.Gson
+import com.dinuberinde.stomp.client.ErrorModel
 import com.dinuberinde.stomp.client.exceptions.InternalFailureException
-import com.dinuberinde.stomp.client.models.ErrorModel
-import java.util.function.BiConsumer
-import kotlin.jvm.Throws
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 
 /**
- * This is a handler for a STOMP result subscription.
+ * Abstract class to handle the result published by a topic.
+ * @param <T> the result type
  */
-class ResultHandler<T>(val handler: BiConsumer<T?, ErrorModel?>, val resultTypeClass: Class<T>) {
+abstract class ResultHandler<T>(val resultTypeClass: Class<T>) {
+    private val gson: Gson = GsonBuilder().disableHtmlEscaping().serializeNulls().create()
+
 
     /**
-     * Yields the model <T> of the STOMP message payload from the json representation.
-     * @param payload the json representation of the payload
-     * @param gson the GSON instance which handles the deserialization of the json
+     * Yields the model <T> of the STOMP message from the json representation.
+     *
+     * @param payload the json
      * @return the model <T>
      */
     @Throws(InternalFailureException::class)
-    fun <T> toModel(payload: String, gson: Gson): T {
+    fun <T> toModel(payload: String): T {
         try {
             return gson.fromJson<T>(payload, resultTypeClass)
         } catch (e: Exception) {
             throw InternalFailureException("Error deserializing model of type ${resultTypeClass.name}")
         }
     }
+
+    /**
+     * It delivers the result of a parsed STOMP message response.
+     * @param result the result as JSON.
+     */
+    abstract fun deliverResult(result: String)
+
+    /**
+     * It delivers an [ErrorModel] which wraps an error.
+     * @param errorModel the error model
+     */
+    abstract fun deliverError(errorModel: ErrorModel)
+
+    /**
+     * Special method to deliver a NOP.
+     */
+    abstract fun deliverNothing()
 }
